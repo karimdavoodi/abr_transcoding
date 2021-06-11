@@ -1,5 +1,6 @@
 #include <iostream>
 #include <cstdlib>
+#include <thread>
 #include <map>
 #include <boost/log/trivial.hpp>
 
@@ -10,12 +11,118 @@ extern "C" {
 
 #include "config.h"
 #include "util.h"
+#include "queue_lock.h"
 #include "amqp_client.h"
 #include "av_input.h"
 #include "av_output.h"
 
 using namespace std;
+/*
+ *   input --> [input_packets] 
+ *                  ----decode----> [input_frames]
+ *                                      ---filter_encodoe_mux_publish--->   
+ *                                      ---filter_encodoe_mux_publish--->   
+ *                                      ---filter_encodoe_mux_publish--->   
+ *                  --------------------------------------mux_publish---> 
+ *
+ *
+ */
+int main()
+{
+    Queue<AVPacket*>    input_packets {10};
+    Queue<AVFrame*>     input_frames {50};
+    MqProducer          inf_queue;
+    AvInput             input;
+    vector<AvOutput>    video_outputs;
+    vector<AvOutput>    audio_outputs;
 
+
+    map<string, string> env_vars = {
+        {"ABR_CONTENT_ID", "sample1"},
+        {"ABR_ORIGINAL_SAVE", "yes"},  // remux all original streams as segment
+        {"ABR_INPUT_SOURCE", "file:///home/karim/Videos/20.mp4"},
+
+        {"ABR_AMQP_HOST", "127.0.0.1"},
+        {"ABR_AMQP_PORT", "5672"},
+        {"ABR_AMQP_USER", "guest"},
+        {"ABR_AMQP_PASS", "guest"},
+        {"ABR_AMQP_SEG_QUEUE", "seg_queue"},
+        {"ABR_AMQP_IMG_QUEUE", "img_queue"},
+        {"ABR_AMQP_INF_QUEUE", "inf_queue"},
+        
+        {"ABR_SEGMENT_LEN", "4"},
+        {"ABR_OUTPUT_FORMAT", "fmp4"},
+        {"ABR_OUTPUT_VCODEC", "h264"},
+        {"ABR_OUTPUT_ACODEC", "aac"},
+        {"ABR_AUTO_SCALE", "yes"}       // generate all small resolution till 240p (divide 2)
+        //ABR_0_SIZE="original"
+        //ABR_0_BITRATE="original"
+        //ABR_1_SIZE="FHD"
+        //ABR_1_BITRATE="6000000"
+    };
+
+    Util::read_env_variables(env_vars);
+    if (env_vars["ABR_AUTO_SCALE"] == "no") {
+        Util::read_abr_env_variables(env_vars);
+    }
+
+    inf_queue.set_config(
+            env_vars["ABR_AMQP_INF_QUEUE"],
+            env_vars["ABR_AMQP_HOST"], 
+            stoi(env_vars["ABR_AMQP_PORT"]),
+            env_vars["ABR_AMQP_USER"], 
+            env_vars["ABR_AMQP_PASS"]);   
+
+    input.set_input(env_vars["ABR_INPUT_SOURCE"]);
+
+    if (!input.init()){
+        LOG(error) << "Can't probe input " << env_vars["ABR_INPUT_SOURCE"];
+        return EXIT_FAILURE;
+    }
+
+    if (env_vars["ABR_AUTO_SCALE"] == "yes") {
+        Util::auto_scale_vars(env_vars, input);    
+    }
+
+    // push content metadata 
+    string json = Util::generate_content_json_metadata(env_vars);
+    inf_queue.send(json);
+
+    for(const auto& stream : input.stream_ctxs){
+        if(stream.type == AVMEDIA_TYPE_VIDEO)
+            video_outputs.emplace_back(AvOutput{ stream.id, stream.index });
+        if(stream.type == AVMEDIA_TYPE_AUDIO)
+            audio_outputs.emplace_back(AvOutput{ stream.id, stream.index });
+    }
+
+    AVPacket *packet = NULL;
+    AVFrame *frame = NULL;
+    
+    while(true) {
+
+        if(!input.next_packet(packet)) 
+            break;
+        
+        if(Util::packet_is_video(packet)){
+                
+            frame = input.decodec_packet(packet); 
+            for (auto& out : video_outputs){
+                out.process_input(packet, frame);
+            }
+            // TODO: generate slide show
+        }else if(Util::packet_is_audio(packet)){
+            for (auto& out : audio_outputs){
+                out.process_input(packet, frame);
+            }
+        } else {
+            // TODO: ignore other non AV streams for now
+        }
+    }
+    for (auto& out : video_outputs)
+        out.flush();
+    for (auto& out : audio_outputs)
+        out.flush();
+}
 /**
  * 
  *    ABR_CONTENT_ID = "name"
@@ -78,83 +185,3 @@ using namespace std;
  *              video  --> key-frame --> jpeg(small) -> image_queue 
  *
  */
-int main()
-{
-    AmqpClient          amqp_client;
-    AvInput             input;
-    vector<AvOutput>    video_outputs;
-    vector<AvOutput>    audio_outputs;
-    
-    map<string, string> env_vars = {
-        {"ABR_CONTENT_ID", "sample1"},
-        {"ABR_INPUT_SOURCE", "file:///home/karim/Videos/20.mp4"},
-        {"ABR_AMQP_HOST", "127.0.0.1"},
-        {"ABR_AMQP_PORT", "5672"},
-        {"ABR_AMQP_USER", "guest"},
-        {"ABR_AMQP_PASS", "guest"},
-        {"ABR_AMQP_SEG_QUEUE", "seg_queue"},
-        {"ABR_AMQP_IMG_QUEUE", "img_queue"},
-        {"ABR_AMQP_INF_QUEUE", "inf_queue"},
-        {"ABR_SEGMENT_LEN", "4"},
-        {"ABR_OUTPUT_FORMAT", "fmp4"},
-        {"ABR_OUTPUT_VCODEC", "h264"},
-        {"ABR_OUTPUT_ACODEC", "aac"},
-        {"ABR_AUTO_SCALE", "yes"}
-    };
-    Util::read_env_variables(env_vars);
-    if (env_vars["ABR_AUTO_SCALE"] == "no") {
-        Util::read_abr_env_variables(env_vars);
-    }
-
-    amqp_client.set_host(env_vars["ABR_AMQP_HOST"], env_vars["ABR_AMQP_PORT"],
-                         env_vars["ABR_AMQP_USER"], env_vars["ABR_AMQP_PASS"]);   
-
-    input.set_input(env_vars["ABR_INPUT_SOURCE"]);
-
-    if (!input.init()){
-        LOG(error) << "Can't probe input " << env_vars["ABR_INPUT_SOURCE"];
-        return EXIT_FAILURE;
-    }
-
-    if (env_vars["ABR_AUTO_SCALE"] == "yes") {
-        Util::auto_scale_vars(env_vars, input);    
-    }
-
-    // push content metadata 
-    string json = Util::generate_content_json_metadata(env_vars);
-    amqp_client.send_queue(env_vars["ABR_AMQP_INF_QUEUE"], json.c_str(), json.size());
-
-    for(const auto& stream : input.stream_ctxs){
-        if(stream.type == AVMEDIA_TYPE_VIDEO)
-            video_outputs.emplace_back(AvOutput{ stream.id, stream.index });
-        if(stream.type == AVMEDIA_TYPE_AUDIO)
-            audio_outputs.emplace_back(AvOutput{ stream.id, stream.index });
-    }
-
-    AVPacket *packet = NULL;
-    AVFrame *frame = NULL;
-    
-    while(true) {
-
-        if(!input.next_packet(packet)) 
-            break;
-        
-        if(Util::packet_is_video(packet)){
-            frame = input.decodec_packet(packet); 
-            for (auto& out : video_outputs){
-                out.process_input(packet, frame);
-            }
-            // TODO: generate slide show
-        }else if(Util::packet_is_audio(packet)){
-            for (auto& out : audio_outputs){
-                out.process_input(packet, frame);
-            }
-        } else {
-            // TODO: ignore other non AV streams for now
-        }
-    }
-    for (auto& out : video_outputs)
-        out.flush();
-    for (auto& out : audio_outputs)
-        out.flush();
-}

@@ -8,6 +8,7 @@ struct AVPacket;
 struct AVFrame;
 
 namespace Util {
+    void wait(int milisec);
     void read_env_variables(std::map<std::string, std::string>& vars);
     void read_abr_env_variables(std::map<std::string, std::string>& vars);
     std::string generate_content_json_metadata(std::map<std::string, std::string>& vars);

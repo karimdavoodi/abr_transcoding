@@ -1,7 +1,9 @@
-#include <boost/format/format_fwd.hpp>
 #include <iostream>
 #include <map>
+#include <thread>
+#include <chrono>
 #include <boost/format.hpp>
+#include <boost/log/trivial.hpp>
 
 #include "util.h"
 #include "config.h"
@@ -11,6 +13,10 @@ using namespace std;
 
 namespace Util
 {
+    void wait(int milisec)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(milisec));        
+    }
 
     void read_env_variables(std::map<std::string, std::string> &env_vars)
     {

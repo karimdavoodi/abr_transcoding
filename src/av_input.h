@@ -24,18 +24,20 @@ private:
             if(dec_frame) av_frame_free(&dec_frame);
         }
     };
-    int width = 0;
-    int height = 0;
-    int bitrate = 0;
-    int duration = 0;
+    int width;
+    int height;
+    int bitrate;
+    int duration;
 
-    AVPacket *packet = NULL;
-    AVFrame *frame = NULL;
-
-    AVFormatContext *fmt_ctx = NULL;
     std::string input;
 
+    AVPacket *packet;
+    AVFrame *frame;
+    AVFormatContext *fmt_ctx;
+
 public:
+    AvInput():width{0}, height{0}, bitrate{0}, duration{0}, 
+        input{""},packet{nullptr},frame{nullptr}, fmt_ctx{nullptr} {}
     std::vector<StreamContext> stream_ctxs;
     
     void set_input(const std::string _input) { input = _input; }
@@ -45,5 +47,9 @@ public:
     int get_width() const { return width; }
     int get_height() const { return height; }
     int get_bitrate() const { return bitrate; }
-    ~AvInput();
+    ~AvInput(){
+            if(packet) av_packet_free(&packet);
+            if(frame) av_frame_free(&frame);
+            if(fmt_ctx) avformat_free_context(fmt_ctx);
+    }
 };

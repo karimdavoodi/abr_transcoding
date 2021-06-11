@@ -3,8 +3,9 @@ extern "C"
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 }
-#include "av_input.h"
+#include <boost/log/trivial.hpp>
 #include "config.h"
+#include "av_input.h"
 
 bool AvInput::init()
 {
@@ -33,11 +34,12 @@ bool AvInput::init()
     for (i = 0; i < fmt_ctx->nb_streams; i++)
     {
         AVStream *stream = fmt_ctx->streams[i];
+        int ii = stream->index;
         // Only Video and Audio
         if (stream->codecpar->codec_type != AVMEDIA_TYPE_AUDIO &&
             stream->codecpar->codec_type != AVMEDIA_TYPE_VIDEO){
-            stream_ctxs[i].id = -1;
-            stream_ctxs[i].index = -1;
+            stream_ctxs[ii].id = -1;
+            stream_ctxs[ii].index = -1;
             continue;
         }
 
@@ -80,7 +82,7 @@ bool AvInput::init()
             LOG(error) << "Failed to open decoder for stream " << i;
             return false;
         }
-
+        
         StreamContext sctx; 
         sctx.index = stream->index;
         sctx.id = stream->id;
@@ -93,7 +95,7 @@ bool AvInput::init()
             LOG(error) << "Can't alloc memory for frame";
             return false;
         }
-        stream_ctxs[i] = sctx;
+        stream_ctxs[ii] = sctx;
     }
 
     if (!(packet = av_packet_alloc())){
@@ -106,17 +108,24 @@ bool AvInput::init()
 }
 bool AvInput::next_packet(AVPacket* pkt)
 {
-    int ret = av_read_frame(fmt_ctx, packet);
-    if(ret < 0 ) return false;
-    pkt = packet;
-    return true;
+    while(true){
+        int ret = av_read_frame(fmt_ctx, packet);
+        if(ret < 0 ){
+            LOG(warning) << "Can't get packet from input"; 
+            return false;
+        } 
+        if (packet->stream_index >= (int)fmt_ctx->nb_streams || 
+                stream_ctxs[packet->stream_index].index < 0) {
+            av_packet_unref(packet);
+            LOG(debug) << "Ingore un wanted stream packet!"; 
+            continue;
+        }
+        pkt = packet;
+        LOG(debug) << "Get packet from stream index " << packet->stream_index; 
+        return true;
+    }
 }
 AVFrame *AvInput::decodec_packet(AVPacket *)
 {
     return NULL;
-}
-AvInput::~AvInput()
-{
-    if(fmt_ctx != NULL)
-        avformat_close_input(&fmt_ctx);
 }
