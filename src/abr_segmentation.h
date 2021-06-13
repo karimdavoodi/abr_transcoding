@@ -70,5 +70,5 @@ namespace AbrSegmentation {
     void find_video_stream(GstPad*);
     void find_audio_stream(GstPad*);
     int on_bus_message(GstBus*, GstMessage*, gpointer);
-    bool run(Parameters&);
+    bool run(Parameters*);
 };

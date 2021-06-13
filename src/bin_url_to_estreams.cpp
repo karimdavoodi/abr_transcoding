@@ -1,50 +1,28 @@
 #include <vector>
 #include <map>
+#include "gst/gstelementfactory.h"
 #include "log.h"
-#include "pad.h"
+#include "gst.h"
 #include "bin_url_to_estreams.h"
 
 using namespace std;
 
-map<string, string> format_types = {
-    {"video/mpegts","tsdemux"},
-    {"video/quicktime","qtdemux"},
-    {"video/x-matroska","matroskademux"},
-    {"video/x-msvideo","matroskademux"},
-    {"video/x-ms-asf","asfdemux"},
-    {"video/x-flv","flvdemux"}
-};
-map<string, string> codecs_types = {
-    {"video/mpeg" , "avdec_mpeg2video"}, // 1,2
-    {"video/x-vp8","avdev_vp8"},
-    {"video/x-vp9","avdec_vp9"},
-    {"video/x-wmv","avdec_wmv3"}, // 1,2,3
-    {"video/x-h264","avdec_h264"},
-    {"video/x-h265","avdec_h265"}
-};
-map<string, string> rtp_payload_codecs = {
-    {"video/x-h265","avdec_h265"}
-};
-map<string, string> rtp_payload_formats = {
-    {"MP2T","rtpmp2tdepay"},
-    {"MP2T","rtpmp2tdepay"}
-};
 
 void urisourcebin_pad_added(
         GstElement *, GstPad *pad, gpointer obj)
 {
     Bin_url_to_estreams *bin = (Bin_url_to_estreams *)obj;
-    LOG(debug) << "Get caps in urisourcebin:" << Pad::pad_caps_string(pad);
+    LOG(debug) << "Get caps in urisourcebin:" << Gst::pad_caps_string(pad);
     Element& queue = bin->get_element("url_queue_src");
     if(!queue.link_pad_to_static_sink(pad, "sink")){
         LOG(error) << "Can't link urisourcebin to queue by caps:" 
-            <<  Pad::pad_caps_string(pad);
+            <<  Gst::pad_caps_string(pad);
     }
 }
 void demux_padd_added(GstElement* , GstPad* pad, gpointer obj)
 {
     Bin_url_to_estreams *bin = (Bin_url_to_estreams *)obj;
-    auto pad_type = Pad::pad_mime_type(pad);
+    auto pad_type = Gst::pad_mime_type(pad);
     LOG(debug) << "Pad of demuxer:" << pad_type;
     if(pad_type.find("video/") != string::npos){
         bin->has_video(pad);
@@ -65,13 +43,14 @@ void typefind_have_type(GstElement *typefind,
     
     // needs demuxer
     
-    if(format_types.count(pad_type) > 0){
-        LOG(debug) << "init demuxer:" << format_types[pad_type];
-        auto demux = bin->add_element(format_types[pad_type], "url_demux", true);
+     
+    if( Gst::mime_demuxer.count(pad_type) > 0){
+        LOG(debug) << "init demuxer:" << Gst::mime_demuxer[pad_type];
+        auto demux = bin->add_element(Gst::mime_demuxer[pad_type], "url_demux", true);
         gst_element_link(typefind, demux);
         g_signal_connect(demux, "pad-added", G_CALLBACK(demux_padd_added), obj);
         // it is video stream
-    }else if(codecs_types.count(pad_type) > 0){
+    }else if(Gst::mime_decoder.count(pad_type) > 0){
         auto src_pad = gst_element_get_static_pad(typefind, "src");
         bin->has_video(src_pad);
         // it is RTP stream

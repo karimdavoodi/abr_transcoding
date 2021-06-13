@@ -25,7 +25,7 @@ int main(int argc, char* argv[])
         LOG(error) << "Please set parameters!";
         return EXIT_FAILURE;
     }
-    return AbrSegmentation::run(parameters);
+    return AbrSegmentation::run(&parameters);
 }
 /**
  * 

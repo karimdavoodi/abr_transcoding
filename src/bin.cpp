@@ -6,6 +6,7 @@ Bin::Bin(const std::string &bin_name, GMainLoop* _loop) noexcept
     loop = _loop;
     name = bin_name;
     bin.set_ptr(gst_bin_new(name.c_str()));
+    
     if (!bin.good())
     {
         LOG(error) << "Can't create bin!";
@@ -22,13 +23,10 @@ GstElement* Bin::add_element(const std::string &plugin, const std::string &pname
         LOG(error) << "Name of element is empty!";
         return nullptr;
     }
-    if (!element.make(plugin, pname))
+    if (!element.make(plugin, pname, set_state))
     {
         LOG(error) << "Element type not found:" << plugin;
         return nullptr;
-    }
-    if(set_state){
-        gst_element_set_state(element.get_ptr(), GST_STATE_PLAYING);
     }
     elements[pname] = element;
 

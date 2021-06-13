@@ -5,6 +5,7 @@
 #include <functional>
 #include <gst/gst.h>
 #include "bin.h"
+
 using std::string;
 
 /*
@@ -13,6 +14,11 @@ using std::string;
  *                                          audio parser --> audio_tee
  */
 class Bin_url_to_estreams : public Bin {
+    private:
+        std::string url;
+        Element video_tee;
+        Element audio_tee;
+         
     public:
         Bin_url_to_estreams(const std::string& url, GMainLoop* loop): 
             Bin("bin_url_to_estreams", loop), url(url) {}
@@ -20,9 +26,5 @@ class Bin_url_to_estreams : public Bin {
 
         std::function<void(GstPad*)> has_video;
         std::function<void(GstPad*)> has_audio;
-
-    private:
-        std::string url;
-         
 
 };

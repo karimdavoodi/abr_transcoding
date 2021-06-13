@@ -1,8 +1,14 @@
-#include "pad.h"
-namespace Pad {
-    std::string pad_mime_type(GstPad* pad)
+#include <cassert>
+#include "gst.h"
+using namespace std;
+
+
+namespace Gst {
+
+    string pad_mime_type(GstPad* pad)
     {
-        if(!pad) return "";
+        assert(pad);
+
         auto caps = gst_pad_query_caps(pad, nullptr);
         if(!caps) return "";
 
@@ -12,24 +18,38 @@ namespace Pad {
         gst_caps_unref(caps);
         return pad_type;
     }
-    std::string pad_name(GstPad* pad)
+    string pad_name(GstPad* pad)
     {
-        if(!pad) return "";
+        assert(pad);
+        
         auto name = gst_pad_get_name(pad);
-        std::string result {name};
+        string result {name};
         g_free(name);
         return result;
     }
-    std::string pad_caps_string(GstPad* pad)
+    string pad_caps_string(GstPad* pad)
     {
+        assert(pad);
+
         auto caps = gst_pad_query_caps(pad, nullptr);
         if(!caps) return "";
         auto caps_string = gst_caps_to_string(caps);
-        std::string result{caps_string};
+        string result{caps_string};
 
         gst_caps_unref(caps);
         g_free(caps_string);
 
         return result;
     }
+    string pad_proper_parser(GstPad* pad)
+    {
+        assert(pad);
+        return "";
+           
+    }
+    string find_parser_for_mime(const string& mime_type)
+    {
+        return "";
+    }
+
 }

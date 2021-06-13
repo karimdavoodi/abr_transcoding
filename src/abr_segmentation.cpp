@@ -2,6 +2,7 @@
 #include "log.h"
 #include "abr_segmentation.h"
 #include "bin_url_to_estreams.h"
+#include "gst.h"
 /*
  *
  *      bin_url_to_estreams -> 
@@ -18,6 +19,7 @@
 namespace AbrSegmentation {
 
     Pipeline_data pdata;
+    Parameters* parameters_ptr;
 
     bool init()
     {
@@ -35,20 +37,15 @@ namespace AbrSegmentation {
         }
         return true;
     }
-    void find_video_stream(GstPad* src)
+    bool run(Parameters* parameters)
     {
-        LOG(info) << "Find Video stream";
-    }
-    void find_audio_stream(GstPad* src)
-    {
-        LOG(info) << "Find Audio stream";
-    }
-    bool run(Parameters& parameters)
-    {
+        assert(parameters);
+
+        parameters_ptr = parameters;
         if(!init()) return false;
 
         Bin_url_to_estreams bin_url_to_estreams { 
-            parameters.get_var("ABR_INPUT_SOURCE"), pdata.loop };
+            parameters->get_var("ABR_INPUT_SOURCE"), pdata.loop };
 
         bin_url_to_estreams.build( find_video_stream, find_audio_stream);
 
@@ -64,7 +61,8 @@ namespace AbrSegmentation {
 
     int on_bus_message(GstBus *, GstMessage* message, gpointer)
     {
-        if(!AbrSegmentation::pdata.pipeline) return true;
+
+        assert(AbrSegmentation::pdata.pipeline);
 
         switch (GST_MESSAGE_TYPE (message)) {
             case GST_MESSAGE_ERROR:
@@ -112,10 +110,8 @@ namespace AbrSegmentation {
     }
     void add_bus_watch()
     {
-        if(!pdata.pipeline){
-            LOG(error) << "Can't add bus watch, pipeline in null";
-            return;
-        }
+        assert(pdata.pipeline);
+
         pdata.bus = gst_element_get_bus (GST_ELEMENT(pdata.pipeline));
         if(!pdata.bus){
             LOG(error) << "Can't add bus watch";
@@ -125,10 +121,8 @@ namespace AbrSegmentation {
     }
     void dot_file(int sec)
     {
-        if(!pdata.pipeline){
-            LOG(error) << "Can't add bus watch, pipeline in null";
-            return;
-        }
+        assert(pdata.pipeline);
+
         char* env = getenv("GST_DEBUG_DUMP_DOT_DIR");
         string make_dot_file = (env != nullptr) ? env : "";
         if(!make_dot_file.empty()){
@@ -149,5 +143,47 @@ namespace AbrSegmentation {
             LOG(trace) << "Not make DOT file";
         }
 
+    }
+    void add_element_to_pipeline(const string& type, const string name)
+    {
+
+    }
+    /**
+     *  if is h26x --> to segmentation 
+     *             --> to decode -> 
+     *                  to encode1 -> to segmentation
+     *                  to encode2 -> to segmentation
+     *
+     *  if not h26x --> to decode --> 
+     *                  to encode1 -> to segmentation
+     *                  to encode2 -> to segmentation
+     *
+     */
+    void find_video_stream(GstPad* pad)
+    {
+        LOG(info) << "Find Video stream:" << Gst::pad_caps_string(pad);
+        auto codec_type = Gst::pad_mime_type(pad);
+        // Add parser
+
+        Element parser;
+        parser.make("", "in_video_parser", true);
+        // Add tee to pipeline
+        Element tee;
+        tee.make("tee", "tee_video", true);
+        tee.link_pad_to_static_sink(pad, "sink");
+        gst_bin_add(GST_BIN(pdata.pipeline), tee.get_ptr());
+
+        // if is AVC or HEVC use original stream in first output
+        if(codec_type.find("264") != string::npos || 
+                codec_type.find("265") != string::npos){
+                
+        }
+        if(parameters_ptr->get_var("ABR_AUTO_SCALE") == "yes"){
+
+        }
+    }
+    void find_audio_stream(GstPad* pad)
+    {
+        LOG(info) << "Find Audio stream:" << Gst::pad_caps_string(pad);
     }
 }
