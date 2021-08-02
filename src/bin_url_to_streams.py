@@ -4,146 +4,125 @@ from gi.repository import Gst
 import util
 import pipeline
 
+'''
+    (url) => urisourcebin -> queue -> demuxer --> parserbin => (streams)
 
-bin = None
-urisourcebin = None 
-queue = None
-typefind = None 
-demuxer = None
+'''
+class Bin_url_to_streams:
+    def __init__(self, url, func_have_video, func_have_audio):
+        logging.info("start  bin_url_to_streams")
+        
+        self.pad_num = 0
 
-have_video = None
-have_audio = None
-pad_num = 0
+        # callback function when streams are ready
+        self.func_have_video = func_have_video
+        self.func_have_audio = func_have_audio
+        
+        self.bin = Gst.Bin.new("bin_url_to_streams")
+        self.urisourcebin = Gst.ElementFactory.make("urisourcebin")
+        self.queue = Gst.ElementFactory.make("queue")
 
-def find_new_pad(pad, pad_type):
-    parser = find_parser(pad.get_name())
-    ...
+        self.bin.add(self.urisourcebin)
+        self.bin.add(self.queue)
+        
 
+        self.urisourcebin.set_property('uri', url)
+        self.urisourcebin.connect('pad-added', self.urisourcebin_pad_add)
+        logging.info("init bin_url_to_streams")
 
-def find_new_pad0(pad, pad_type):
-    global bin, pad_num
-    
-    # Ghost pad as 'src' 
-    pad_name = 'src_' + str(pad_num)
-    pad_num += 1
-    ghost_pad = Gst.GhostPad.new(pad_name, pad)
-    bin.add_pad(ghost_pad)
+    def urisourcebin_pad_add(self, elm, pad):
+        self.print_pad_info(pad, 'urisourcebin')
 
-    cap =  pad.query_caps()[0].to_string()
-    logging.info(f"HAVE PAD Caps:{cap}")
-    if pad_type == 'video':
-        struct = pad.query_caps().get_structure(0)
-        width = struct.get_int("width").value
-        height = struct.get_int("height").value
-        level = struct.get_string("level")
-        profile = struct.get_string("profile")
-        pipeline.streams['video_h'] = height
-        pipeline.streams['video_w'] = width 
-        pipeline.streams['video_profile'] = profile 
-        pipeline.streams['video_level'] = level
-        pipeline.streams['video_codec'] = struct.get_name()
-        have_video(pad_name)
-    elif pad_type == 'audio':
-        struct = pad.query_caps().get_structure(0)
-        mpegversion = struct.get_int("mpegversion").value
-        level = struct.get_int("level").value
-        channels = struct.get_int("channels").value
-        audio_codec = struct.get_name()
-        pipeline.streams['audios'].append({
-            'codec': audio_codec,
-            'mpegversion': mpegversion,
-            'level': level,
-            'channels': channels
-            })
-        have_audio(pad_name)
+        logging.info(f"LINK: urisourcebin {pad.get_name()} -->  queue")
+        pad.link(self.queue.get_static_pad('sink'))
+        queue_src = self.queue.get_static_pad('src')
 
-
-def urisourcebin_pad_add(elm, pad):
-    global bin, queue 
-    cap =  pad.query_caps()[0].to_string()
-    logging.info(f"Add pad in urisourcebin {pad.get_name()}: Caps: {cap}")
-     
-    queue_sink = queue.get_static_pad('sink')
-    if not queue_sink:
-        logging.error("Can't get queue sink pad")
-    pad.link(queue.get_static_pad('sink'))
-
-def demuxer_pad_add(elm, pad):
-    pad_name = pad.get_name()
-    logging.info(f"Add pad in demuxer: {pad_name}")
-    if 'video' in pad_name:
-        find_new_pad(pad, 'video')
-    elif 'audio' in pad_name:
-        find_new_pad(pad, 'audio')
-
-
-def typefind_have_type(elm, arg0, cap):
-    global bin, demuxer, have_video, have_audio 
-
-    pad_cap = cap.to_string()
-    pad_mime = cap.get_structure(0).get_name()
-    logging.info(f"Add pad in typefind Caps:{pad_cap}, mime:{pad_mime}")
-    if util.mime_demuxer.get(pad_mime):
-        demux_name = util.mime_demuxer.get(pad_mime)
-        demuxer = Gst.ElementFactory.make(demux_name, "url_demux")
-        demuxer.set_state(Gst.State.PLAYING)              
-        bin.add(demuxer)
-        typefind.link(demuxer)
-        demuxer.connect("pad-added", demuxer_pad_add)
-        logging.info(f"link typefind to demuxer: {demux_name}")
-    elif util.mime_decoder.get(pad_mime):
-        typefind_src = typefind.get_static_pad('src')
-        find_new_pad(typefind_src, 'video')
-    elif pad_mime == 'application/x-rtp':
-        encodin_name = cap.get_structure(0).get('encodin-name','')
-        if encodin_name == 'MP2T':
-            rtmpdepay = Gst.ElementFactory.make("rtpmp2tdepay", "url_rtmpdepay")
-            rtmpdepay.set_state(Gst.State.PLAYING)              
-            demuxer = Gst.ElementFactory.make("tsdemux", "url_demux")
-            demuxer.set_state(Gst.State.PLAYING)          
-            bin.app(rtmpdepay)
-            bin.app(demuxer)
-            typefind.link(rtmpdepay)
-            rtmpdepay.link(demuxer)
-            #Gst.ElementFactory.gst_element_link_many(typefind, rtmpdepay, demuxer) 
-            demuxer.connect("pad-added", demuxer_pad_add)
-            logging.info(f"link typefind to rtmpdepay and demuxer")
-        elif encodin_name == 'H264' or encodin_name == 'H265':
-            rtmpdepay_name = 'rtph264depay' if encodin_name == 'H264' else 'rtph265depay'
-            rtmpdepay = Gst.ElementFactory.make(rtmpdepay_name, "url_rtmpdepay")
-            rtmpdepay.set_state(Gst.State.PLAYING)   
-            bin.app(rtmpdepay)
-            typefind.link(rtmpdepay)
-            rtmpdepay_src = rtmpdepay.get_static_pad('src')
-            find_new_pad(rtmpdepay_src, 'video')
+        cap =  pad.query_caps()[0]
+        pad_mime = cap.get_name()
+        if util.mime_demuxer.get(pad_mime):
+            demux_name = util.mime_demuxer.get(pad_mime)
+            self.demuxer = Gst.ElementFactory.make(demux_name, "url_demux")
+            self.demuxer.set_state(Gst.State.PLAYING)              
+            self.bin.add(self.demuxer)
+            logging.info(f"LINK: queue --> {demux_name}")
+            self.queue.link(self.demuxer)
+            self.demuxer.connect("pad-added", self.demuxer_pad_add)
+        elif util.mime_decoder.get(pad_mime):
+            self.send_stream_to_parser(queue_src)
+        elif pad_mime == 'application/x-rtp':
+            encodin_name = cap.get_structure(0).get('encodin-name','')
+            if encodin_name == 'MP2T':
+                self.rtmpdepay = Gst.ElementFactory.make("rtpmp2tdepay", "url_rtmpdepay")
+                self.rtmpdepay.set_state(Gst.State.PLAYING)              
+                self.demuxer = Gst.ElementFactory.make("tsdemux", "url_demux")
+                self.demuxer.set_state(Gst.State.PLAYING)          
+                self.bin.app(self.rtmpdepay)
+                self.bin.app(self.demuxer)
+                logging.info(f"LINK: queue --> rtmpdepay -->  tsdemux")
+                self.queue.link(self.rtmpdepay)
+                self.rtmpdepay.link(self.demuxer)
+                self.demuxer.connect("pad-added", self.demuxer_pad_add)
+            elif encodin_name == 'H264' or encodin_name == 'H265':
+                rtmpdepay_name = 'rtph264depay' if encodin_name == 'H264' else 'rtph265depay'
+                self.rtmpdepay = Gst.ElementFactory.make(rtmpdepay_name, "url_rtmpdepay")
+                self.rtmpdepay.set_state(Gst.State.PLAYING)   
+                self.bin.app(self.rtmpdepay)
+                logging.info(f"LINK: queue --> rtph264depay")
+                self.queue.link(self.rtmpdepay)
+                rtmpdepay_src = self.rtmpdepay.get_static_pad('src')
+                self.send_stream_to_parser(rtmpdepay_src)
+            else: 
+                logging.error(f"Not support RTP type: {encodin_name}")
+                pipeline.loop_quit(True)
         else:
-            logging.error(f"Not support RTP type: {encodin_name}")
+            logging.error(f"Not support type: {pad_mime}")
             pipeline.loop_quit(True)
-    else:
-        logging.error(f"Not support type: {pad_mime}")
-        pipeline.loop_quit(True)
-            
 
-def init(uri, _have_video, _have_audio):
-    global bin, urisourcebin, queue, typefind, have_video, have_audio 
 
-    have_video = _have_video
-    have_audio = _have_audio
+    def print_pad_info(self, pad, loc):
+        cap =  pad.query_caps()[0].to_string()
+        logging.info(f"Pad in {loc!r}: {pad.get_name()}: Caps: {cap}")
 
-    logging.info("start  bin_url_to_streams")
-    bin = Gst.Bin.new("bin_url_to_streams")
-    urisourcebin = Gst.ElementFactory.make("urisourcebin")
-    queue = Gst.ElementFactory.make("queue")
-    typefind = Gst.ElementFactory.make("typefind")
+    def parsebin_pad_add(self, elm, pad):
+        self.print_pad_info(pad, 'Parser')
+        
+        # Link pad to bin ghost pad 
+        pad_name = 'src_' + str(self.pad_num)
+        self.pad_num += 1
+        ghost_pad = Gst.GhostPad.new(pad_name, pad)
+        self.bin.add_pad(ghost_pad)
+       
+        # fill streams record
+        struct = pad.query_caps().get_structure(0)
+        pad_mime = struct.get_name()
+        if 'video' in pad_mime:
+            util.input_streams['video_heigh'] = struct.get_int("heigh").value
+            util.input_streams['video_width'] = struct.get_int("width").value
+            util.input_streams['video_profile'] = struct.get_string("profile")
+            util.input_streams['video_level'] = struct.get_string("level")
+            util.input_streams['video_mime'] = struct.get_name()
+            self.func_have_video(pad_name, self)
+        elif 'audio' in pad_mime:
+            util.input_streams['audios'].append({
+                'mime': struct.get_name(),
+                'mpegversion': struct.get_int("mpegversion").value,
+                'level': struct.get_int("level").value,
+                'channels': struct.get_int("channels").value,
+                'rate': struct.get_int("rate").value
+                })
+            self.func_have_audio(pad_name, self)
 
-    bin.add(urisourcebin)
-    bin.add(queue)
-    bin.add(typefind)
-     
-    queue.link(typefind) 
 
-    urisourcebin.set_property('uri', uri)
-    urisourcebin.connect('pad-added', urisourcebin_pad_add)
-    typefind.connect('have-type', typefind_have_type)
-    logging.info("init bin_url_to_streams")
+    def send_stream_to_parser(self, pad):
+        #self.print_pad_info(pad, 'find')
+        self.parsebin = Gst.ElementFactory.make("parsebin")
+        self.parsebin.set_state(Gst.State.PLAYING)              
+        self.bin.add(self.parsebin)
+        pad.link(self.parsebin.get_static_pad('sink'))
+        self.parsebin.connect("pad-added", self.parsebin_pad_add)
+
+    def demuxer_pad_add(self, elm, pad):
+        self.print_pad_info(pad, 'demuxer')
+        pad_name = pad.get_name()
+        self.send_stream_to_parser(pad)
 

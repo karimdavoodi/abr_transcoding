@@ -1,17 +1,15 @@
 import logging
-from gi.repository import GLib, GObject, Gst
+import random
+from gi.repository import Gst
 
 import util
 import pipeline
 
-bin_id = 0
 
 class Bin_decode_stream:
     
     def __init__(self, stream_type):
-        global bin_id
-        logging.info(str(pipeline.streams))
-        bin_id += 1
+        bin_id = random.randint(0,1000)
         self.stream_type = stream_type
         self.bin = Gst.Bin.new("bin_decode_" + stream_type + str(bin_id))
         self.decoder = Gst.ElementFactory.make("decodebin")
@@ -28,11 +26,16 @@ class Bin_decode_stream:
         return self.bin.get_static_pad('sink')
 
     def decoder_pad_add(self, elm, pad):
-        caps =  pad.query_caps()[0]
-        logging.info(caps.to_string())
-        logging.info("Add pad in decodebin, caps:" + caps.to_string())
-        self.fakesink = Gst.ElementFactory.make("fakesink")
-        self.fakesink.set_state(Gst.State.PLAYING)              
-        self.bin.add(self.fakesink)
-        self.decoder.link(self.fakesink)
+        self.tee = Gst.ElementFactory.make("tee")
+        self.tee.set_state(Gst.State.PLAYING)              
+        self.bin.add(self.tee)
+        self.decoder.link(self.tee)
+        for abr in util.output_videos:
+            tee_src = self.tee.get_request_pad('src_%u') 
+            fake = Gst.ElementFactory.make("fakesink")
+            fake.set_state(Gst.State.PLAYING)              
+            self.bin.add(fake)
+            tee_src.link(fake.get_static_pad('sink'))
+            logging.info(f"Make fake for {abr['size']}")
+            
     

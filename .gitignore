@@ -13,3 +13,4 @@ build
 third_party
 .clangd
 bk
+node_modules

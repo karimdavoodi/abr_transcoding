@@ -10,9 +10,6 @@ loop = None
 pipe = None
 bus = None
 error = False
-streams = {
-        'audios':[]
-        }
 
 def loop_quit(has_error = False):
    global loop, error
@@ -39,12 +36,11 @@ def bus_call(bus, message, loop):
 def init():
     global pipe, loop, bus
 
-    
     GObject.threads_init()
     Gst.init(None)
 
-    Gst.debug_set_active(True)
-    Gst.debug_set_default_threshold(3)
+    #Gst.debug_set_active(True)
+    #Gst.debug_set_default_threshold(3)
     
     loop = GObject.MainLoop()
     pipe = Gst.Pipeline.new()
